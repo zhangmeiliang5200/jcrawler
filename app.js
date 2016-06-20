@@ -1,6 +1,5 @@
-var Spider = require("./jcrawler");
-var Site = require("./jcrawler/Site");
+var JCrawler = require("./jcrawler/Spider.js");
 
-var crawler = Spider.Create("test", Site.Create(), "jcrawler", {}, {});
-crawler.setThreadNum(2);
-console.log(crawler.threadNum);
+var spider = JCrawler.Spider("test", JCrawler.Site(), "jcrawler", {}, JCrawler.QueueDuplicateRemovedScheduler());
+spider.setDownloader();
+spider.run();
