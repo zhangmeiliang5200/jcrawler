@@ -1,8 +1,8 @@
-const http = require('http');
-const https = require('https');
+var request = require('request');
+const url = require('url');
 
 function HttpDownloader() {
-    this.download = function (request, spider) {
+    this.download = function (page, spider, sucessCallback, failedCallback) {
         if (spider.site == null || spider.site == undefined) {
             return null;
         }
@@ -11,56 +11,36 @@ function HttpDownloader() {
 
         var acceptStatCodes = site.acceptStatCode;
 
-        try {
-            // if (GeneratePostBody != null) {
-            //     SingleExecutor.Execute(() => {
-            //         GeneratePostBody(spider.Site, request);
-            //     });
-            //  }
-            var options = this.generateHttpOptions(request, site);
-            var client = null;
-            if (request.url.subString(0, 6) == "https:") {
-                client = https;
-            } else {
-                client = http;
-            }
-            client.request(options, (res) => {
-                res.on('data', (d) => {
-                    var page = this.handleResponse(request, res, d, site);
-                    page.targetUrl = request.Url.ToString();
-                    return page;
-                });
-            }).on('error', (e) => {
-                throw "下载 {" + request.Url + "} 失败. Exception: {" + e + "}";
-            });
-        }
-        catch (e) {
-            var page = Page(request, site.contentType);
-            throw e;
-        }
-    }
-    this.handleResponse = function (request, res, response, site) {
-        var page = Page(request, site.contentType);
-        page.content = response;
-        page.url = request.url;
-        page.statusCode = 200;
-        for (var header in res.headers) {
-            page.request.putExtra(header.Key, header.Value);
-        }
 
-        return page;
+        // if (GeneratePostBody != null) {
+        //     SingleExecutor.Execute(() => {
+        //         GeneratePostBody(spider.Site, request);
+        //     });
+        //  }
+        var options = this.generateHttpOptions(page.request, site);
+
+        request(options, function (error, response, body) {
+            if (!error && response.statusCode == 200) {
+                page.content = body;
+                page.statusCode = 200;
+                for (var header in response.headers) {
+                    page.request.putExtra(header.Key, header.Value);
+                }
+
+                sucessCallback(page);
+            } else {
+                failedCallback(page.request, error);
+            }
+        });
     }
+
     this.generateHttpOptions = function (request, site) {
         var options = {};
-        options.hostname = request.url;
-        options.path = request.url;
-        if (request.url.subString(0, 6) == "https:") {
-            options.port = 443;
-        } else {
-            options.port = 80;
-        }
+        options.url = request.url;
         options.method = request.method;
         options.headers = {};
+
+
         if (site.headers["Content-Type"] != null && site.headers["Content-Type"] != "NULL") {
             options.headers["ContentType"] = "application /x-www-form-urlencoded; charset=UTF-8";
         }
@@ -101,6 +81,9 @@ function HttpDownloader() {
 
         return options;
     }
+    this.dispose = function () {
+
+    }
     return this;
 }
-exports.Create = HttpDownloader;
+module.exports = HttpDownloader

@@ -1,5 +1,8 @@
-var Queue = require("./Queue.js");
 var HttpDownloader = require("./HttpDownloader.js");
+var Site = require("./Site.js");
+var QueueDuplicateRemovedScheduler = require("./QueueDuplicateRemovedScheduler.js");
+var ConsolePipeline = require("./ConsolePipeline.js");
+var $=require('jquery');
 
 String.prototype.contains = function (text) {
     if (text == '') return true;
@@ -59,55 +62,6 @@ var Status = { Init: 0, Running: 1, Stopped: 2, Finished: 4, Exited: 8 }
 
 var ContentType = { Html: 0, Json: 1 }
 
-function Site() {
-    this.startRequests = [];
-    this.contentType = ContentType.Html;
-    this.domain = null;
-    this._encodingName = null;
-    this.headers = {};
-    this.arguments = {};
-    this.userAgent = null;
-    this.accept = null;
-    this.timeout = 5000;
-    this.acceptStatCode = [200];
-    this.maxSleepTime = 1000;
-    this.minSleepTime = 100;
-    this.retryTimes = 5;
-    this.cycleRetryTimes = 5;
-    this.cookie = null;
-    this.proxy = null;
-    this.isUseGzip = false;
-    this.clearStartRequests = function () {
-        this.startRequests = [];
-    }
-    this.addStartUrl = function (startUrl) {
-        this.addStartUrlRequest(Request(startUrl, 1, {}));
-        return this;
-    }
-    this.addStartUrl = function (startUrl, extras) {
-        this.addStartUrlRequest(Request(startUrl, 1, extras));
-        return this;
-    }
-    this.addStartUrls = function (startUrls) {
-        for (var _a = 0; _a < startUrls.length; ++_a) {
-            this.addStartUrlRequest(Request(startUrls[_a], 1, extras));
-        }
-        return this;
-    }
-    this.addStartUrlRequest = function (request) {
-        this.startRequests.push(requst);
-        if (this.domain == null) {
-            this.domain = startRequest.url.host;
-        }
-        return this;
-    }
-    this.addHeader = function (key, value) {
-        this.headers[key] = value;
-        return this;
-    }
-    return this;
-}
-
 function Request(url, grade, extras) {
     this.url = url;
     this.referer = null;
@@ -154,10 +108,6 @@ Request.cycleTriedTimes = "983009ae-baee-467b-92cd-44188da2b021";
 Request.statusCode = "02d71099-b897-49dd-a180-55345fe9abfc";
 Request.proxy = "6f09c4d6-167a-4272-8208-8a59bebdfe33";
 
-function ChromePluginDownloader() {
-
-}
-
 function Spider(name, site, userId, pageProcessor, scheduler) {
     printInfo();
 
@@ -166,7 +116,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     }
 
     if (site == null || site == undefined) {
-        site = Site.Create();
+        site = new Site();
     }
 
     if (pageProcessor == null || pageProcessor == undefined) {
@@ -174,19 +124,20 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     }
 
     if (scheduler == null || scheduler == undefined) {
-        scheduler = QueueDuplicateRemovedScheduler();
+        scheduler = new QueueDuplicateRemovedScheduler();
     }
 
     this.name = name;
     this.userId = userId;
-    this.pageProcessor = pageProcessor;
-    this.scheduler = scheduler;
     this.site = site;
-    this.pageProcessor.site = site;
+    this.pageProcessor = pageProcessor;
+    this.pageProcessor["site"] = site;
+    this.scheduler = scheduler;
     this.startRequests = site.startRequests;
     this.scheduler = scheduler;
     this._errorRequestsFile = "./" + name + "_errorRequest.txt";
     this.stat = Status.Init;
+    //由于JS的异步特性，因此定义threadnum为每秒中运行的URL数量
     this.threadNum = 1;
     this.deep = 65535;
     this.finishedCount = 0;
@@ -194,17 +145,18 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     this.skipWhenResultIsEmpty = false;
     this.saveStatus = true;
     this.pipelines = [];
-    this.downloader = HttpDownloader.Create();
+    this.downloader = new HttpDownloader();
     this.requestSuccessCallback = [];
     this.requestFailedCallback = [];
     this.closingCallBack = [];
     this.settings = {};
     this.isExited = false;
     this.startRequests = [];
-    this.waitInterval = 8;
-    this._waitCountLimit = 20;
-    this._waitCount;
+    this.waitInterval = 500;
+    this._waitCountLimit = 15000 / this.waitInterval;
+    this._waitCount = 0;
     this._init = false;
+    this.isExitWhenComplete = true;
 
     this.setThreadNum = function (number) {
         this.checkIfRunning();
@@ -212,15 +164,15 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
             throw "ThreadNum should be more than 1.";
         }
         this.threadNum = number;
-        if (this.downloader != null && this.downloader != undefined) {
-            this.downloader.threadNum = threadNum;
-        }
+        var emptySleepTime = this._waitCountLimit * this.waitInterval;
+        this.waitInterval = 1000 / number;
+        this._waitCountLimit = emptySleepTime / this.waitInterval;
         return this;
     }
 
     this.setEmptySleepTime = function (emptySleepTime) {
-        if (this.emptySleepTime >= 1000) {
-            this._waitCountLimit = this.emptySleepTime / this.waitInterval;
+        if (emptySleepTime >= 1000) {
+            this._waitCountLimit = emptySleepTime / this.waitInterval;
         }
         else {
             throw "Sleep time should be large than 1000.";
@@ -245,7 +197,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     this.addStartUrls = function (startUrls) {
         this.checkIfRunning();
         for (var _a; _a < startUrls.length; ++_a) {
-            this.startRequests.push(Request(startUrls[_a], 1, {}));
+            this.startRequests.push(new Request(startUrls[_a], 1, {}));
         }
 
         return this;
@@ -253,7 +205,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
 
     this.addStartUrl = function (startUrl) {
         this.checkIfRunning();
-        this.startRequests.push(Request(startUrl, 1, {}));
+        this.startRequests.push(new Request(startUrl, 1, {}));
         return this;
     }
 
@@ -297,17 +249,18 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         this.scheduler.init(this);
 
         if (this.downloader == null || this.downloader == undefined) {
-            downloader = HttpDownloader.Create();
+            downloader = new HttpDownloader();
         }
 
         //this.downloader.threadNum = this.threadNum;
 
         if (this.pipelines.length == 0) {
-            this.pipelines.push(ConsolePipeline());
+            throw "Please set at least one pipeline.";
         }
 
         if (this.startRequests != null) {
             if (this.startRequests.length > 0) {
+
                 this.info("添加网址到调度中心,数量: " + this.startRequests.length);
 
                 for (var _a = 0; _a < this.startRequests.length; ++_a) {
@@ -333,136 +286,117 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
             this.startTime = new Date();
         }
 
-        var waitCount = 0;
-        var firstTask = false;
-
-        while (this.stat == Status.Running) {
-            var request = this.scheduler.poll(this);
-
-            if (request == null) {
-                if (waitCount > this._waitCountLimit && this.isExitWhenComplete) {
-                    this.stat = Status.Finished;
-                    break;
-                }
-                waitCount = this.waitNewUrl(waitCount);
-            }
-            else {
-                this.info("Left: {" + this.scheduler.getLeftRequestsCount(this) + "} Total: {" + this.scheduler.getTotalRequestsCount(this) + "} Thread: {" + this.threadNum + "}");
-
-                waitCount = 0;
-
-                try {
-                    this.processRequest(request, downloader);
-                    sleep(Site.SleepTime);
-                    this.onSuccess(request);
-                }
-                catch (e) {
-                    this.onError(request);
-                    this.error("采集失败: " + request.Url + ".", e);
-                }
-                finally {
-                    //if (this.site.httpProxyPoolEnable && request.getExtra(Request.proxy) != null) {
-                    //    this.site.returnHttpProxyToPool(request.getExtra(Request.proxy), request.getExtra(Request.statusCode));
-                    //}
-
-                    this.finishedPageCount++;
-                }
-
-                if (!firstTask) {
-                    sleep(3000);
-                    firstTask = true;
-                }
-            }
-        }
-
-        this.finishedTime = new Date();
-
-        for (var _a = 0; _a < this.pipelines.length; ++_a) {
-            this.pipelines[_a].dispose();
-        }
-
-        if (this.stat == Status.Finished) {
-            this.onClose();
-
-            this.info("任务 {" + this.name + "} 结束.");
-        }
-
-        if (this.stat == Status.Stopped) {
-            this.info("任务 {" + this.name + "} 停止成功.");
-        }
-
-        for (var _a = 0; _a < this.closingCallBack.length; ++_a) {
-            this.closingCallBack[_a]();
-        }
-
-        if (this.stat == Status.Exited) {
-            this.info("任务 {" + this.name + "} 退出成功.");
-        }
-
-        this.isExited = true;
+        setInterval(this.processRequest, this.waitInterval, this);
     }
 
-    this.processRequest = function (request, downloader) {
-        var page = null;
+    this.processRequest = function (spider) {
+        var request = spider.scheduler.poll(spider);
+        if (request == null) {
+            if (spider._waitCount > spider._waitCountLimit && spider.isExitWhenComplete) {
+                spider.stat = Status.Finished;
+                if (!spider.isExited) {
+                    spider.finishedTime = new Date();
 
-        try {
-            page = downloader.download(request, this);
+                    for (var _a = 0; _a < spider.pipelines.length; ++_a) {
+                        spider.pipelines[_a].dispose();
+                    }
 
-            if (page.isSkip) {
+                    if (spider.stat == Status.Finished) {
+                        spider.onClose();
+
+                        spider.info("任务 " + spider.name + " 结束.");
+                    }
+
+                    if (spider.stat == Status.Stopped) {
+                        spider.info("任务 " + spider.name + " 停止成功.");
+                    }
+
+                    for (var _a = 0; _a < spider.closingCallBack.length; ++_a) {
+                        spider.closingCallBack[_a]();
+                    }
+
+                    if (spider.stat == Status.Exited) {
+                        spider.info("任务 " + spider.name + " 退出成功.");
+                    }
+
+                    spider.isExited = true;
+                    spider.processRequest = null;
+                }
                 return;
             }
-
-            if (this.pageHandlers != null) {
-                for (var _a = 0; _a < this.pageHandlers.length; ++_a) {
-                    page = this.pageHandlers[_a](page);
-                }
-            }
-
-            this.pageProcessor.process(page);
-        }
-
-        catch (e) {
-            if (this.site.cycleRetryTimes > 0) {
-                page = this.addToCycleRetry(request, Site);
-            }
-            if (e.contains("下载失败:")) {
-                this.warn(de.Message);
-            } else {
-                this.warn("解析页数数据失败: " + request.Url + ", 请检查您的数据抽取设置.");
-            }
-        }
-
-        if (page == null) {
-            this.onError(request);
-            return;
-        }
-
-        if (page.isNeedCycleRetry) {
-            this.extractAndAddRequests(page, true);
-            return;
-        }
-
-        if (!page.missTargetUrls) {
-            if (!(this.skipWhenResultIsEmpty && page.resultItems.isSkip)) {
-                this.extractAndAddRequests(page, this.spawnUrl);
-            }
-        }
-
-        if (!page.resultItems.isSkip) {
-            for (var _a = 0; _a < this.pipelines.length; ++_a) {
-                page = this.pipelines[_a].process(page.resultItems, this);
-            }
+            ++spider._waitCount;
         }
         else {
-            var message = "页面 {" + request.Url + "} 解析结果为 0.";
-            this.warn(message);
-        }
-        this.info("采集: {" + request.Url + "} 成功.");
-    }
+            spider.info("Left: " + spider.scheduler.getLeftRequestsCount(spider) + " Total: " + spider.scheduler.getTotalRequestsCount(spider) + " Thread: " + spider.threadNum);
 
-    this.waitNewUrl = function (waitCount) {
-        sleep(this.waitInterval);
-        return ++waitCount;
+            spider._waitCount = 0;
+
+            try {
+                var page = new Page(request, spider.site.contentType);
+
+                spider.downloader.download(page, spider, function (p) {
+                    if (p.resultItems.isSkip) {
+                        return;
+                    }
+
+                    if (spider.pageHandlers != null) {
+                        for (var _a = 0; _a < spider.pageHandlers.length; ++_a) {
+                            p = spider.pageHandlers[_a](p);
+                        }
+                    }
+
+                    spider.pageProcessor.process(p);
+
+                    if (p == null) {
+                        spider.onError(request);
+                        return;
+                    }
+
+                    if (p.isNeedCycleRetry) {
+                        spider.extractAndAddRequests(p, true);
+                        return;
+                    }
+
+                    if (!p.missTargetUrls) {
+                        if (!(spider.skipWhenResultIsEmpty && p.resultItems.isSkip)) {
+                            spider.extractAndAddRequests(p, spider.spawnUrl);
+                        }
+                    }
+
+                    if (!p.resultItems.isSkip) {
+                        for (var _a = 0; _a < spider.pipelines.length; ++_a) {
+                            spider.pipelines[_a].process(p.resultItems, spider);
+                        }
+                    }
+                    else {
+                        var message = "页面 " + request.url + " 解析结果为 0.";
+                        spider.warn(message);
+                    }
+                    spider.onSuccess(p.request);
+                    spider.info("采集: " + p.request.url + " 成功.");
+                }, function (p) {
+                    if (spider.site.cycleRetryTimes > 0) {
+                        p = spider.addToCycleRetry(request, spider.site);
+                    }
+                    if (e.contains("下载失败:")) {
+                        spider.warn(de.Message);
+                    } else {
+                        spider.warn("解析页数数据失败: " + request.Url + ", 请检查您的数据抽取设置.");
+                    }
+                });
+
+            }
+            catch (e) {
+                spider.error("采集失败: " + request.Url + ".", e);
+            }
+            finally {
+                //if (this.site.httpProxyPoolEnable && request.getExtra(Request.proxy) != null) {
+                //    this.site.returnHttpProxyToPool(request.getExtra(Request.proxy), request.getExtra(Request.statusCode));
+                //}
+
+                spider.finishedPageCount++;
+            }
+        }
     }
 
     this.onClose = function () {
@@ -474,17 +408,17 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
 
     this.info = function (msg) {
         var m = "[INFO] [" + new Date() + "] " + msg;
-        console.log(m);
+        console.info(m);
     }
 
     this.warn = function (msg) {
         var m = "[WARN] [" + new Date() + "] " + msg;
-        console.log(m);
+        console.warn(m);
     }
 
     this.error = function (msg) {
         var m = "[ERROR] [" + new Date() + "] " + msg;
-        console.log(m);
+        console.error(m);
     }
 
     this.onError = function (request) {
@@ -500,9 +434,9 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     }
 
     this.dispose = function () {
-        while (!this.isExited) {
-            sleep(500);
-        }
+        // while (!this.isExited) {
+        //     sleep(500);
+        // }
 
         this.onClose();
     }
@@ -512,11 +446,11 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         for (var _a = 0; _a < this.closingCallBack.length; ++_a) {
             this.closingCallBack[_a]();
         }
-        this.warn("任务 {" + this.name + "} 退出成功.");
+        this.warn("任务 " + this.name + " 退出成功.");
     }
 
     this.addToCycleRetry = function (request) {
-        var page = Page(request, site.contentType);
+        var page = new Page(request, site.contentType);
         var cycleTriedTimesObject = request.getExtra(Request.cycleTriedTimes);
         if (cycleTriedTimesObject == null) {
             request.priority = 0;
@@ -548,11 +482,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
 }
 
 function Page(request, contentType) {
-    this._selectable = null;
-    this._content = null;
-    this.url = function () {
-        return request.url;
-    }
+    this.content = null;
     this.targetUrl = null;
     this.title = null;
     this.contentType = contentType;
@@ -562,32 +492,11 @@ function Page(request, contentType) {
     this.resultItems.request = request;
     this.statusCode = null;
     this.padding = null;
-    this.content = function () {
-        return this._content;
-    }
-    this.setContent = function (content) {
-        if (_content != content) {
-            _content = content;
-            _selectable = null;
-        }
-    }
     this.missTargetUrls = false;
     this.exception = null;
     this.targetRequests = [];
     this.addResultItem = function (key, value) {
         this.resultItems.addOrUpdateResultItem(key, value);
-    }
-    this.isSkip = function () {
-        return this.resultItems.isSkip;
-    }
-    this.setIsSkip = function (isSkip) {
-        this.resultItems.isSkip = isSkip;
-    }
-    this.selectable = function () {
-        if (_selectable == null || _selectable == undefined) {
-            _selectable = new Selectable(this._content, this.contentType == ContentType.Json ? this.padding : this.request.url, this.contentType);
-        }
-        return _selectable;
     }
     this.addTargetRequests = function (urls) {
         for (var _a = 0; _a < urls.length; ++_a) {
@@ -598,8 +507,7 @@ function Page(request, contentType) {
             this.targetRequests.push(Request(canonicalizeUrl(s, this.url), this.request.depth + 1, this.request.extras));
         }
     }
-    this.addTargetRequests(requests)
-    {
+    this.addTargetRequests = function (requests) {
         for (var _a = 0; _a < requests.length; ++_a) {
             var s = requests[_a];
             if (s == null || s == undefined || s == "#" || s.startsWith("javascript:")) {
@@ -608,8 +516,7 @@ function Page(request, contentType) {
             this.targetRequests.push(requests[_a]);
         }
     }
-    this.addTargetUrls(urls, priority)
-    {
+    this.addTargetUrls = function (urls, priority) {
         for (var _a = 0; _a < urls.length; ++_a) {
             var s = urls[_a];
             if (s == null || s == undefined || s == "#" || s.startsWith("javascript:")) {
@@ -620,64 +527,20 @@ function Page(request, contentType) {
             this.targetRequests.push(request);
         }
     }
-    this.addTargetUrl(url)
-    {
+    this.addTargetUrl = function (url) {
         if (s == null || s == undefined || s == "#" || s.startsWith("javascript:")) {
             return;
         }
 
         this.targetRequests.push(Request(canonicalizeUrl(url, this.url), this.request.depth + 1, this.request.extras));
     }
-    this.addTargetRequest(request)
-    {
+    this.addTargetRequest = function (request) {
         this.targetRequests.push(request);
     }
     return this;
 }
 
 Page.images = "580c9065-0f44-47e9-94ea-b172d5a730c0";
-
-function QueueDuplicateRemovedScheduler() {
-    this.duplicateRemover = {};
-    this._queue = Queue.Create();
-    this.pushWhenNoDuplicate = function (request, spider) {
-        this._queue.enqueue(request);
-    }
-    this.resetDuplicateCheck = function (spider) {
-        this.duplicateRemover = {};
-    }
-    this.push = function (request, spider) {
-        if (this.duplicateRemover[request.identity] == null || this.shouldReserved(request)) {
-            this.pushWhenNoDuplicate(request, spider);
-        }
-    }
-    this.poll = function (spider) {
-        return this._queue.isEmpty() ? null : this._queue.dequeue();
-    }
-
-    this.shouldReserved = function (request) {
-        var cycleTriedTimes = request.getExtra(Request.cycleTriedTimes);
-        if (cycleTriedTimes == null) {
-            return false;
-        }
-        else {
-            return cycleTriedTimes > 0;
-        }
-    }
-    this.dispose = function () {
-        this.duplicateRemover = null;
-    }
-    this.getLeftRequestsCount = function (spider) {
-        return this._queue.getLength();
-    }
-
-    this.getTotalRequestsCount = function (spider) {
-        return this.duplicateRemover.length;
-    }
-    this.init = function () {
-    }
-    return this;
-}
 
 function ResultItems() {
     this.fields = {};
@@ -693,20 +556,7 @@ function ResultItems() {
     return this;
 }
 
-function ConsolePipeline() {
-    this.process = function (resultItems, spider) {
-        for (var _a = 0; _a < resultItems.results.length; ++_a) {
-            var entry = resultItems.results[_a];
-            console.log(entry.Key + ":\t" + entry.Value);
-        }
-    }
 
-    this.dispose = function () {
-    }
-}
-function sleep(d) {
-    for (var t = Date.now(); Date.now() - t <= d;);
-}
 
 function canonicalizeUrl(url, refer) {
     // 实现对相对路径的补充
@@ -726,7 +576,3 @@ function printInfo() {
 }
 
 exports.Spider = Spider;
-exports.Site = Site;
-exports.QueueDuplicateRemovedScheduler = QueueDuplicateRemovedScheduler;
-exports.HttpDownloader = HttpDownloader;
-exports.ChromePluginDownloader = ChromePluginDownloader;
