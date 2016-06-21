@@ -1,4 +1,6 @@
 var Queue = require("./Queue.js");
+var HttpDownloader = require("./HttpDownloader.js");
+
 String.prototype.contains = function (text) {
     if (text == '') return true;
     else if (text == null) return false;
@@ -56,13 +58,6 @@ String.prototype.endsWith = function (end) {
 var Status = { Init: 0, Running: 1, Stopped: 2, Finished: 4, Exited: 8 }
 
 var ContentType = { Html: 0, Json: 1 }
-
-function Logger() {
-    this.info = function (msg) {
-        console.log(msg);
-    }
-    return this;
-}
 
 function Site() {
     this.startRequests = [];
@@ -158,7 +153,7 @@ function Request(url, grade, extras) {
 Request.cycleTriedTimes = "983009ae-baee-467b-92cd-44188da2b021";
 Request.statusCode = "02d71099-b897-49dd-a180-55345fe9abfc";
 Request.proxy = "6f09c4d6-167a-4272-8208-8a59bebdfe33";
- 
+
 function ChromePluginDownloader() {
 
 }
@@ -186,7 +181,6 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     this.userId = userId;
     this.pageProcessor = pageProcessor;
     this.scheduler = scheduler;
-    this.logger = Logger();
     this.site = site;
     this.pageProcessor.site = site;
     this.startRequests = site.startRequests;
@@ -200,7 +194,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     this.skipWhenResultIsEmpty = false;
     this.saveStatus = true;
     this.pipelines = [];
-    this.downloader = HttpDownloader();
+    this.downloader = HttpDownloader.Create();
     this.requestSuccessCallback = [];
     this.requestFailedCallback = [];
     this.closingCallBack = [];
@@ -292,7 +286,6 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
     this.setDownloader = function (downloader) {
         this.checkIfRunning();
         this.downloader = downloader;
-        this.downloader.threadNum = this.threadNum == 0 ? 1 : this.threadNum;
         return this;
     }
 
@@ -304,25 +297,25 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         this.scheduler.init(this);
 
         if (this.downloader == null || this.downloader == undefined) {
-            downloader = HttpDownloader();
+            downloader = HttpDownloader.Create();
         }
 
-        this.downloader.threadNum = this.threadNum;
+        //this.downloader.threadNum = this.threadNum;
 
         if (this.pipelines.length == 0) {
-            //this.pipelines.push(ConsolePipeline());
+            this.pipelines.push(ConsolePipeline());
         }
 
         if (this.startRequests != null) {
             if (this.startRequests.length > 0) {
-                this.logger.info("添加网址到调度中心,数量: {" + this.startRequests.length + "}");
+                this.info("添加网址到调度中心,数量: " + this.startRequests.length);
 
                 for (var _a = 0; _a < this.startRequests.length; ++_a) {
-                    this.scheduler.push(request, this);
+                    this.scheduler.push(this.startRequests[_a], this);
                 }
             }
             else {
-                this.logger.info("不需要添加网址到调度中心.", true);
+                this.info("不需要添加网址到调度中心.");
             }
         }
 
@@ -347,14 +340,14 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
             var request = this.scheduler.poll(this);
 
             if (request == null) {
-                if (waitCount > _waitCountLimit && isExitWhenComplete) {
+                if (waitCount > this._waitCountLimit && this.isExitWhenComplete) {
                     this.stat = Status.Finished;
                     break;
                 }
                 waitCount = this.waitNewUrl(waitCount);
             }
             else {
-                this.logger.info("Left: {" + this.scheduler.getLeftRequestsCount(this) + "} Total: {" + this.scheduler.getTotalRequestsCount(this) + "} Thread: {" + this.threadNum + "}");
+                this.info("Left: {" + this.scheduler.getLeftRequestsCount(this) + "} Total: {" + this.scheduler.getTotalRequestsCount(this) + "} Thread: {" + this.threadNum + "}");
 
                 waitCount = 0;
 
@@ -365,7 +358,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
                 }
                 catch (e) {
                     this.onError(request);
-                    this.logger.error("采集失败: " + request.Url + ".", e);
+                    this.error("采集失败: " + request.Url + ".", e);
                 }
                 finally {
                     //if (this.site.httpProxyPoolEnable && request.getExtra(Request.proxy) != null) {
@@ -391,11 +384,11 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         if (this.stat == Status.Finished) {
             this.onClose();
 
-            this.logger.info("任务 {" + this.name + "} 结束.");
+            this.info("任务 {" + this.name + "} 结束.");
         }
 
         if (this.stat == Status.Stopped) {
-            this.logger.info("任务 {" + this.name + "} 停止成功.");
+            this.info("任务 {" + this.name + "} 停止成功.");
         }
 
         for (var _a = 0; _a < this.closingCallBack.length; ++_a) {
@@ -403,7 +396,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         }
 
         if (this.stat == Status.Exited) {
-            this.logger.info("任务 {" + this.name + "} 退出成功.");
+            this.info("任务 {" + this.name + "} 退出成功.");
         }
 
         this.isExited = true;
@@ -433,9 +426,9 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
                 page = this.addToCycleRetry(request, Site);
             }
             if (e.contains("下载失败:")) {
-                this.logger.warn(de.Message);
+                this.warn(de.Message);
             } else {
-                this.logger.warn("解析页数数据失败: " + request.Url + ", 请检查您的数据抽取设置.");
+                this.warn("解析页数数据失败: " + request.Url + ", 请检查您的数据抽取设置.");
             }
         }
 
@@ -462,9 +455,9 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         }
         else {
             var message = "页面 {" + request.Url + "} 解析结果为 0.";
-            this.logger.warn(message);
+            this.warn(message);
         }
-        this.logger.info("采集: {" + request.Url + "} 成功.");
+        this.info("采集: {" + request.Url + "} 成功.");
     }
 
     this.waitNewUrl = function (waitCount) {
@@ -477,6 +470,21 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         this.scheduler.dispose();
         this.downloader.dispose();
         this.pageProcessor.dispose();
+    }
+
+    this.info = function (msg) {
+        var m = "[INFO] [" + new Date() + "] " + msg;
+        console.log(m);
+    }
+
+    this.warn = function (msg) {
+        var m = "[WARN] [" + new Date() + "] " + msg;
+        console.log(m);
+    }
+
+    this.error = function (msg) {
+        var m = "[ERROR] [" + new Date() + "] " + msg;
+        console.log(m);
     }
 
     this.onError = function (request) {
@@ -504,7 +512,7 @@ function Spider(name, site, userId, pageProcessor, scheduler) {
         for (var _a = 0; _a < this.closingCallBack.length; ++_a) {
             this.closingCallBack[_a]();
         }
-        this.logger.warn("任务 {" + this.name + "} 退出成功.");
+        this.warn("任务 {" + this.name + "} 退出成功.");
     }
 
     this.addToCycleRetry = function (request) {
@@ -633,18 +641,18 @@ function QueueDuplicateRemovedScheduler() {
     this.duplicateRemover = {};
     this._queue = Queue.Create();
     this.pushWhenNoDuplicate = function (request, spider) {
-        _queue.enqueue(request);
+        this._queue.enqueue(request);
     }
     this.resetDuplicateCheck = function (spider) {
-        duplicateRemover = {};
+        this.duplicateRemover = {};
     }
     this.push = function (request, spider) {
-        if (duplicateRemover[request.identity] == null || this.shouldReserved(request)) {
+        if (this.duplicateRemover[request.identity] == null || this.shouldReserved(request)) {
             this.pushWhenNoDuplicate(request, spider);
         }
     }
     this.poll = function (spider) {
-        return _queue.isEmpty() ? _queue.dequeue() : null;
+        return this._queue.isEmpty() ? null : this._queue.dequeue();
     }
 
     this.shouldReserved = function (request) {
@@ -657,14 +665,14 @@ function QueueDuplicateRemovedScheduler() {
         }
     }
     this.dispose = function () {
-        duplicateRemover = null;
+        this.duplicateRemover = null;
     }
     this.getLeftRequestsCount = function (spider) {
-        return _queue.getLength();
+        return this._queue.getLength();
     }
 
     this.getTotalRequestsCount = function (spider) {
-        return duplicateRemover.length;
+        return this.duplicateRemover.length;
     }
     this.init = function () {
     }
@@ -676,15 +684,26 @@ function ResultItems() {
     this.isSkip = false;
     this.request = null;
     this.getResultItem = function (key) {
-        return fields[key];
+        return this.fields[key];
     };
     this.addOrUpdateResultItem = function (key, value) {
-        fields[key] = value;
+        this.fields[key] = value;
         return this;
     }
     return this;
 }
 
+function ConsolePipeline() {
+    this.process = function (resultItems, spider) {
+        for (var _a = 0; _a < resultItems.results.length; ++_a) {
+            var entry = resultItems.results[_a];
+            console.log(entry.Key + ":\t" + entry.Value);
+        }
+    }
+
+    this.dispose = function () {
+    }
+}
 function sleep(d) {
     for (var t = Date.now(); Date.now() - t <= d;);
 }
@@ -704,10 +723,8 @@ function printInfo() {
     console.log("== Version: 0.9.10                                         ==");
     console.log("== Author: zlzforever@163.com                              ==");
     console.log("=============================================================");
-    console.log("");
 }
 
-sleep(5000);
 exports.Spider = Spider;
 exports.Site = Site;
 exports.QueueDuplicateRemovedScheduler = QueueDuplicateRemovedScheduler;

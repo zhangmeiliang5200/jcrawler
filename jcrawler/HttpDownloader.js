@@ -101,4 +101,6 @@ function HttpDownloader() {
 
         return options;
     }
+    return this;
 }
+exports.Create = HttpDownloader;
