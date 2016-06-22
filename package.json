@@ -1,4 +1,7 @@
 {
-    "name": "jcrawler",
-    "main": "./Spider.js"
+  "name": "jcrawler",
+  "main": "./Spider.js",
+  "dependencies": {
+    "mongodb": "^2.1.18"
+  }
 }
